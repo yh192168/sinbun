@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>パスワード総当たりシミュレーション</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        #log {
+            height: 300px;
+            overflow-y: scroll;
+            border: 1px solid #ccc;
+            padding: 10px;
+            background: #f9f9f9;
+        }
+        #result {
+            margin-top: 20px;
+            font-size: 1.2em;
+            color: green;
+        }
+    </style>
+</head>
+<body>
+    <h1>パスワード総当たりシミュレーション</h1>
+    <label for="userPassword">あなたの4桁パスワードを入力してください:</label>
+    <input type="password" id="userPassword" maxlength="4">
+    <button onclick="bruteForce()">総当たり開始</button>
+
+    <div id="log"></div>
+    <p id="result"></p>
+
+    <script>
+        async function bruteForce() {
+            const userPassword = document.getElementById("userPassword").value;
+            const log = document.getElementById("log");
+            const result = document.getElementById("result");
+            log.innerHTML = "";
+            result.textContent = "";
+
+            for (let i = 0; i <= 9999; i++) {
+                const attempt = i.toString().padStart(4, '0');
+                const entry = document.createElement("div");
+                entry.textContent = `試行中: ${attempt}`;
+                log.appendChild(entry);
+                log.scrollTop = log.scrollHeight;
+
+                // 高速化のため待機時間を短く（または0に）
+                await new Promise(resolve => setTimeout(resolve, 1));
+
+                if (attempt === userPassword) {
+                    result.textContent = `パスワード発見: ${attempt} → おめでとう`;
+                    break;
+                }
+            }
+        }
+    </script>
+</body>
+</html>
