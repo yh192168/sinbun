@@ -1,0 +1,224 @@
+
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>ありがとう実習生の先生</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      transition: background 2s ease;
+      overflow-x: hidden;
+    }
+
+    .fixed-text {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 2em;
+      opacity: 0;
+      transition: opacity 1s ease;
+      pointer-events: none;
+      white-space: pre-wrap;
+      text-align: center;
+      color: #333;
+      z-index: 5;
+    }
+
+    .visible {
+      opacity: 1;
+    }
+
+    .rain {
+      background: linear-gradient(to bottom, #a0c4ff, #cbd5e1);
+    }
+
+    .sunny {
+      background: linear-gradient(to top, #87ceeb, #fffacd);
+    }
+
+    .tool {
+      position: fixed;
+      bottom: -200px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #fff;
+      border: 2px solid #ccc;
+      border-radius: 10px;
+      padding: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.2);
+      animation: floatUp 6s ease-in-out forwards;
+      z-index: 10;
+    }
+
+    @keyframes floatUp {
+      0% { bottom: -200px; opacity: 0; }
+      30% { opacity: 1; }
+      100% { bottom: 100px; opacity: 1; }
+    }
+
+    .calculator input, .memo textarea, .timer input {
+      font-size: 1em;
+      margin: 5px;
+    }
+
+    .calculator button, .timer button {
+      font-size: 1em;
+      margin: 2px;
+    }
+
+    .memo textarea {
+      width: 200px;
+      height: 100px;
+    }
+  </style>
+</head>
+<body class="rain">
+
+  <div id="text" class="fixed-text visible">実習生の先生</div>
+
+  <script>
+    const messages = [
+      "実習生の先生",
+      "３週間",
+      "ありがとうございました",
+      "アクセスいただき、ありがとうございます。",
+      "このサイトはいつまでも閉じません。",
+      "６うめは皆さんを応援しています！",
+      "次のステップもがんばってください！",
+      "雨の日も風の日も必死に来てくれました。",
+      "授業で反応がなかったら笑って胡麻化す",
+      "みんなで協力する実習生の先生",
+      "みんなになじもうとする実習生の先生をぼくたちは忘れません。",
+      "いつでも来てくださいね。"
+    ];
+
+    const textElement = document.getElementById("text");
+    let currentIndex = -1;
+    let toolsShown = false;
+
+    function updateBodyHeight() {
+      document.body.style.height = `${messages.length * 100}vh`;
+    }
+
+    function showTools() {
+      if (toolsShown) return;
+      toolsShown = true;
+
+      // Calculator
+      const calc = document.createElement("div");
+      calc.className = "tool calculator";
+      calc.innerHTML = `
+        <div>電卓</div>
+        <input type="text" id="calcDisplay" readonly>
+        <br>
+        <button onclick="calcInput('1')">1</button>
+        <button onclick="calcInput('2')">2</button>
+        <button onclick="calcInput('3')">3</button>
+        <button onclick="calcInput('+')">+</button><br>
+        <button onclick="calcInput('4')">4</button>
+        <button onclick="calcInput('5')">5</button>
+        <button onclick="calcInput('6')">6</button>
+        <button onclick="calcInput('-')">-</button><br>
+        <button onclick="calcInput('7')">7</button>
+        <button onclick="calcInput('8')">8</button>
+        <button onclick="calcInput('9')">9</button>
+        <button onclick="calcInput('*')">*</button><br>
+        <button onclick="calcInput('0')">0</button>
+        <button onclick="calcInput('.')">.</button>
+        <button onclick="calcClear()">C</button>
+        <button onclick="calcEqual()">=</button>
+      `;
+      document.body.appendChild(calc);
+
+      // Memo pad
+      const memo = document.createElement("div");
+      memo.className = "tool memo";
+      memo.innerHTML = `
+        <div>メモ帳</div>
+        <textarea placeholder="ここにメモを書いてね"></textarea>
+      `;
+      document.body.appendChild(memo);
+
+      // Timer
+      const timer = document.createElement("div");
+      timer.className = "tool timer";
+      timer.innerHTML = `
+        <div>タイマー（秒）</div>
+        <input type="number" id="timerInput" placeholder="秒数">
+        <button onclick="startTimer()">スタート</button>
+        <div id="timerDisplay"></div>
+      `;
+      document.body.appendChild(timer);
+    }
+
+    function calcInput(val) {
+      const display = document.getElementById("calcDisplay");
+      display.value += val;
+    }
+
+    function calcClear() {
+      document.getElementById("calcDisplay").value = "";
+    }
+
+    function calcEqual() {
+      const display = document.getElementById("calcDisplay");
+      try {
+        display.value = eval(display.value);
+      } catch {
+        display.value = "エラー";
+      }
+    }
+
+    function startTimer() {
+      const input = document.getElementById("timerInput").value;
+      const display = document.getElementById("timerDisplay");
+      let time = parseInt(input);
+      if (isNaN(time) || time <= 0) {
+        display.textContent = "正しい秒数を入力してね";
+        return;
+      }
+      display.textContent = `${time} 秒`;
+      const interval = setInterval(() => {
+        time--;
+        display.textContent = `${time} 秒`;
+        if (time <= 0) {
+          clearInterval(interval);
+          display.textContent = "時間です！";
+        }
+      }, 1000);
+    }
+
+    window.addEventListener("scroll", () => {
+      const scrollY = window.scrollY;
+      const windowHeight = window.innerHeight;
+      const index = Math.min(messages.length - 1, Math.floor(scrollY / windowHeight));
+
+      if (index !== currentIndex) {
+        currentIndex = index;
+        textElement.classList.remove("visible");
+
+        setTimeout(() => {
+          textElement.textContent = messages[index];
+          textElement.classList.add("visible");
+
+          if (index < 7) {
+            document.body.className = "rain";
+          } else {
+            document.body.className = "sunny";
+          }
+
+          if (index === messages.length - 1) {
+            showTools();
+          }
+        }, 300);
+      }
+    });
+
+    updateBodyHeight();
+  </script>
+
+</body>
+</html>
