@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>黒背景・全画面 + メーター付き 歌詞プレイヤー（大きい文字）</title>
+<style>
+  :root{
+    color-scheme: dark;
+    --bg: #000;          /* 完全黒 */
+    --text: #f5f7fa;     /* 明るい白 */
+    --muted: #9aa6b2;
+    --accent: #00d2ff;   /* 行ハイライト色 */
+    --lyric-size: 40px;  /* ★ 初期の歌詞サイズ（ここを変えると一括変更） */
+    --lyric-line-height: 1.6;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+      "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Meiryo", sans-serif;
+    letter-spacing:.2px;
+  }
+
+  .wrap{max-width: 1200px; margin: 0 auto; padding: 8px 14px}
+  header{
+    display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+    justify-content: space-between; padding-bottom:6px;
+  }
+  .controls{display:flex; gap:8px; align-items:center; flex-wrap:wrap}
+  .btn{
+    background:#111; color:var(--text);
+    border:1px solid #222; border-radius:10px; padding:8px 12px;
+    font-size:14px; cursor:pointer;
+  }
+  .btn:hover{ border-color:#333 }
+  .file input{ display:none }
+  .file label{ cursor:pointer }
+
+  audio{ width:100%; margin:6px 0 8px; }
+
+  /* 画面本体：左=歌詞 / 右=メーター */
+  .main{
+    display:grid; grid-template-columns: 1fr 84px; gap:12px;
+    align-items: stretch;
+  }
+  @media (max-width: 700px){
+    .main{ grid-template-columns: 1fr; }
+    .meter-panel{ order:2; }
+  }
+
+  .lyrics{
+    /* 画面高に追従、ヘッダ+音声UIぶんを控除。縦が低い端末では自動的に縮む */
+    height: calc(100vh - 200px);
+    overflow-y:auto; scroll-behavior:smooth; padding: 8px 6px;
+    font-size: var(--lyric-size);           /* ★ 歌詞サイズ適用 */
+    line-height: var(--lyric-line-height);  /* ★ 行間 */
+  }
+  .line{
+    padding: 8px 6px; opacity:.62;
+    transition: opacity .18s, transform .18s, color .18s;
+    border-radius: 6px;
+  }
+  .line.active{
+    opacity:1; color: var(--accent);
+    transform: translateX(2px);
+  }
+
+  .status{ font-size:12px; color:var(--muted); white-space:pre-wrap }
+
+  /* 右端：マイクメーター（LED風） */
+  .meter-panel{
+    display:flex; flex-direction:column; align-items:center; gap:8px;
+    padding-top:2px;
+  }
+  #meterCanvas{
+    width: 68px; height: 360px; /* 少し背を高く（文字が大きくなるためバランス調整） */
+    border-radius:8px; background:#0a0a0a; border:1px solid #202020;
+    box-shadow: inset 0 0 20px rgba(0,0,0,.45);
+  }
+  .meter-ctrl{ display:flex; gap:6px; flex-wrap:wrap; justify-content:center }
+  .meter-info{ font-size:11px; color:var(--muted); }
+  @media (max-height: 740px){
+    #meterCanvas{ height: 280px; }
+    .lyrics{ height: calc(100vh - 220px); }
+  }
+
+  /* ヘッダを隠せる（余計なUIを消す） */
+  .header-hidden{ display:none }
+
+  /* iPadの安全領域 */
+  @supports(padding:max(0px)){
+    .wrap{ padding-left: max(14px, env(safe-area-inset-left));
+           padding-right: max(14px, env(safe-area-inset-right)); }
+  }
+
+  /* 歌詞サイズコントロール（見やすいように控えめな色） */
+  .sizebar{
+    display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+  }
+  .sizebar .num{ font-variant-numeric: tabular-nums; font-size:12px; color:#cbd5e1 }
+  .sizebar input[type="range"]{ width: 220px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header id="hdr">
+    <div class="controls">
+      <span class="file btn">
+        <label>音源（MP3/M4A/WAV）<input id="audioFile" type="file" accept="audio/*"></label>
+      </span>
+      <span class="file btn">
+        <label>歌詞（LRC）<input id="lrcFile" type="file" accept=".lrc,text/plain"></label>
+      </span>
+      <button id="playBtn" class="btn">▶ 再生</button>
+      <button id="pauseBtn" class="btn">⏸ 一時停止</button>
+    </div>
+    <div class="controls">
+      <div class="sizebar">
+        <button id="fontMinus" class="btn" title="小さく">A−</button>
+        <input id="fontRange" type="range" min="24" max="72" step="2" value="40">
+        <button id="fontPlus" class="btn" title="大きく">A＋</button>
+        <span id="fontVal" class="num">40px</span>
+      </div>
+      <button id="fsBtn" class="btn">⤢ 全画面</button>
+      <button id="hideUiBtn" class="btn">UI最小</button>
+      <button id="showUiBtn" class="btn" style="display:none">UI復帰</button>
+    </div>
+  </header>
+
+  <audio id="player" controls preload="metadata"></audio>
+  <div id="status" class="status">音源とLRCを読み込んでね。URL指定も可 → ?song=...&lrc=...</div>
+
+  <div class="main">
+    <!-- 左：歌詞 -->
+    <div id="lyrics" class="lyrics" aria-live="polite"></div>
+
+    <!-- 右：メーター -->
+    <div class="meter-panel">
+      <canvas id="meterCanvas" width="68" height="360"></canvas>
+      <div class="meter-ctrl">
+        <button id="startMeterBtn" class="btn">🎤 メーター開始</button>
+        <button id="stopMeterBtn" class="btn">■ 停止</button>
+      </div>
+      <div id="meterInfo" class="meter-info">-- dBFS</div>
+      <div class="meter-info">緑:安全 / 黄:大きめ / 赤:ピーク注意</div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===== 便利関数 ===== */
+const $ = s => document.querySelector(s);
+const player = $('#player'), lyricsEl = $('#lyrics'), status = $('#status');
+const fontRange = $('#fontRange'), fontVal = $('#fontVal');
+
+let entries = []; // [{t:number, text:string}]
+let offsetMs = 0;
+
+/* ===== LRC パース ===== */
+function parseLRC(text){
+  const lines = text.replace(/\r/g,'').split('\n');
+  const items = [];
+  offsetMs = 0;
+
+  for(const raw of lines){
+    const line = raw.trim();
+    if(!line) continue;
+
+    // offset
+    const off = line.match(/^\[offset\s*:\s*(-?\d+)\s*\]$/i);
+    if(off){ offsetMs = parseInt(off[1],10) || 0; continue; }
+
+    // メタは無視（[ti]等）
+    if(/^\[(ti|ar|al|length)\s*:\s*/i.test(line)) continue;
+
+    // 複数タイムタグ対応
+    const tags = [...line.matchAll(/\[(\d{1,2}):(\d{1,2})(?:\.(\d{1,3}))?\]/g)];
+    if(tags.length===0) continue;
+    const textPart = line.replace(/\[(\d{1,2}):(\d{1,2})(?:\.(\d{1,3}))?\]/g,'').trim();
+
+    for(const m of tags){
+      const mm = parseInt(m[1],10);
+      const ss = parseInt(m[2],10);
+      const ms = m[3] ? parseInt(m[3].padEnd(3,'0'),10) : 0;
+      items.push({ t:(mm*60*1000+ss*1000+ms)/1000, text:textPart });
+    }
+  }
+  items.sort((a,b)=>a.t-b.t);
+
+  // offset適用
+  if(offsetMs){
+    const off = offsetMs/1000;
+    items.forEach(it => it.t = Math.max(0, it.t + off));
+  }
+  return items;
+}
+
+/* ===== 歌詞表示 ===== */
+function renderLyrics(list){
+  lyricsEl.innerHTML = '';
+  list.forEach((e,i)=>{
+    const div = document.createElement('div');
+    div.className = 'line';
+    div.dataset.index = i;
+    div.dataset.time = e.t.toFixed(3);
+    div.textContent = e.text || ' ';
+    div.addEventListener('click', ()=>{
+      player.currentTime = e.t + 0.001;
+      player.play();
+    });
+    lyricsEl.appendChild(div);
+  });
+}
+
+function updateActiveLine(currentTime){
+  if(!entries.length) return;
+  let idx = 0;
+  for(let i=0;i<entries.length;i++){
+    if(entries[i].t <= currentTime + 0.0001) idx = i; else break;
+  }
+  const prev = lyricsEl.querySelector('.line.active');
+  const next = lyricsEl.querySelector(`.line[data-index="${idx}"]`);
+  if(prev !== next){
+    prev?.classList.remove('active');
+    next?.classList.add('active');
+    const top = next.offsetTop - lyricsEl.clientHeight/2 + next.clientHeight/2;
+    lyricsEl.scrollTo({ top, behavior:'smooth' });
+  }
+}
+
+/* ===== ファイル読み込み ===== */
+function readTextFile(file){
+  return new Promise((resolve,reject)=>{
+    const fr = new FileReader();
+    fr.onload = ()=>resolve(fr.result);
+    fr.onerror = reject;
+    fr.readAsText(file, 'utf-8');
+  });
+}
+
+/* ===== マイク・メーター（Web Audio API） ===== */
+let audioCtx, analyser, micSource, rafId, peakDb = -Infinity, lastPeakTime = 0;
+const meterInfo = $('#meterInfo');
+const meterCanvas = $('#meterCanvas');
+const mctx = meterCanvas.getContext('2d');
+
+function resizeMeterCanvas(){
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = meterCanvas.clientWidth;
+  const cssH = meterCanvas.clientHeight;
+  meterCanvas.width = Math.round(cssW * dpr);
+  meterCanvas.height = Math.round(cssH * dpr);
+  mctx.setTransform(dpr,0,0,dpr,0,0);
+}
+
+function dbToNorm(db){
+  // dBFS(-inf..0) → 0..1 へマッピング
+  const minDb = -60;
+  if(!isFinite(db) || db <= minDb) return 0;
+  if(db >= 0) return 1;
+  return (db - minDb) / (0 - minDb);
+}
+
+function drawMeter(level /*0..1*/, db){
+  const w = meterCanvas.clientWidth;
+  const h = meterCanvas.clientHeight;
+  mctx.clearRect(0,0,w,h);
+
+  // 背景
+  mctx.fillStyle = '#0a0a0a';
+  mctx.fillRect(0,0,w,h);
+
+  // LED段数
+  const segments = 28;
+  const gap = 3;
+  const pad = 5;
+  const segH = (h - pad*2 - gap*(segments-1)) / segments;
+  const segW = w - pad*2;
+
+  const greenEnd = Math.floor(segments * 0.65);
+  const yellowEnd = Math.floor(segments * 0.88);
+  const lit = Math.round(level * segments);
+
+  for(let i=0;i<segments;i++){
+    const y = h - pad - (i+1)*segH - i*gap;
+    // ベース
+    mctx.fillStyle = 'rgba(255,255,255,0.07)';
+    mctx.fillRect(pad, y, segW, segH);
+
+    // 点灯
+    if(i < lit){
+      let color;
+      if(i < greenEnd) color = '#35f37f';
+      else if(i < yellowEnd) color = '#ffd553';
+      else color = '#ff5555';
+      mctx.fillStyle = color;
+      mctx.fillRect(pad, y, segW, segH);
+      // 上辺のハイライト
+      mctx.fillStyle = 'rgba(255,255,255,.12)';
+      mctx.fillRect(pad, y, segW, 2);
+    }
+  }
+
+  // ピークホールドの横線
+  const now = performance.now();
+  const peakHoldMs = 900;
+  if(now - lastPeakTime > peakHoldMs){
+    peakDb = db;
+    lastPeakTime = now;
+  }
+  const peakLevel = dbToNorm(peakDb);
+  const yPeak = h - pad - (peakLevel * (h - pad*2));
+  mctx.strokeStyle = '#ffb3b3';
+  mctx.lineWidth = 2;
+  mctx.beginPath();
+  mctx.moveTo(pad, yPeak);
+  mctx.lineTo(w - pad, yPeak);
+  mctx.stroke();
+
+  meterInfo.textContent = (isFinite(db)? db.toFixed(1):'--') + ' dBFS';
+}
+
+function startMeter(){
+  if(rafId) cancelAnimationFrame(rafId);
+  resizeMeterCanvas();
+
+  navigator.mediaDevices.getUserMedia({
+    audio:{ echoCancellation:true, noiseSuppression:true, autoGainControl:false }
+  }).then(stream=>{
+    const AC = window.AudioContext || window.webkitAudioContext;
+    audioCtx = new AC();
+    micSource = audioCtx.createMediaStreamSource(stream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.8;
+    micSource.connect(analyser);
+
+    const buffer = new Uint8Array(analyser.fftSize);
+    peakDb = -Infinity; lastPeakTime = performance.now();
+
+    const loop = ()=>{
+      analyser.getByteTimeDomainData(buffer);
+      let sum = 0;
+      for(let i=0;i<buffer.length;i++){
+        const v = (buffer[i] - 128) / 128; // -1..1
+        sum += v*v;
+      }
+      const rms = Math.sqrt(sum / buffer.length) || 1e-8;
+      const db = 20 * Math.log10(rms);
+      const level = dbToNorm(db);
+
+      if(db > peakDb){ peakDb = db; lastPeakTime = performance.now(); }
+      drawMeter(level, db);
+      rafId = requestAnimationFrame(loop);
+    };
+    loop();
+  }).catch(err=>{
+    meterInfo.textContent = 'マイク取得失敗: ' + err.message;
+  });
+}
+
+function stopMeter(){
+  if(rafId) cancelAnimationFrame(rafId), rafId = null;
+  if(micSource?.mediaStream){
+    micSource.mediaStream.getTracks().forEach(t=>t.stop());
+  }
+  if(audioCtx){
+    audioCtx.close().catch(()=>{});
+    audioCtx = null;
+  }
+  // 消灯
+  const w = meterCanvas.clientWidth, h = meterCanvas.clientHeight;
+  mctx.clearRect(0,0,w,h);
+  meterInfo.textContent = '-- dBFS';
+}
+
+/* ===== 初期化 ===== */
+document.addEventListener('DOMContentLoaded', ()=>{
+  // 再生UI
+  $('#playBtn').addEventListener('click', ()=> player.play());
+  $('#pauseBtn').addEventListener('click', ()=> player.pause());
+  window.addEventListener('keydown', e=>{
+    if(e.code==='Space' && !/input|textarea|select/i.test(document.activeElement.tagName)){
+      e.preventDefault(); player.paused ? player.play() : player.pause();
+    }
+  });
+
+  // 同期
+  player.addEventListener('timeupdate', ()=> updateActiveLine(player.currentTime));
+  player.addEventListener('seeked', ()=> updateActiveLine(player.currentTime));
+
+  // ファイル選択
+  $('#audioFile').addEventListener('change', e=>{
+    const f = e.target.files?.[0]; if(!f) return;
+    const url = URL.createObjectURL(f);
+    player.src = url;
+    status.textContent = `音源: ${f.name}  (${(f.size/1024/1024).toFixed(2)} MB)`;
+  });
+  $('#lrcFile').addEventListener('change', async e=>{
+    const f = e.target.files?.[0]; if(!f) return;
+    const text = await readTextFile(f);
+    entries = parseLRC(text);
+    renderLyrics(entries);
+    status.textContent += `\n歌詞: ${f.name}  行数:${entries.length}  offset:${offsetMs}ms`;
+    updateActiveLine(player.currentTime || 0);
+  });
+
+  // 全画面
+  $('#fsBtn').addEventListener('click', async ()=>{
+    try{
+      const el = document.documentElement; // ページ全体を対象
+      if(!document.fullscreenElement){
+        await el.requestFullscreen();
+        $('#fsBtn').textContent = '⤢ 解除';
+      }else{
+        await document.exitFullscreen();
+        $('#fsBtn').textContent = '⤢ 全画面';
+      }
+    }catch(e){
+      alert('このブラウザでは全画面APIが制限されています。Safariなら「共有→ホーム画面に追加」して起動すると完全な全画面になります。');
+    }
+  });
+
+  // ヘッダの表示/非表示（余計なUIを消す）
+  const hdr = $('#hdr');
+  $('#hideUiBtn').addEventListener('click', ()=>{
+    hdr.classList.add('header-hidden');
+    $('#hideUiBtn').style.display='none';
+    $('#showUiBtn').style.display='inline-block';
+  });
+  $('#showUiBtn').addEventListener('click', ()=>{
+    hdr.classList.remove('header-hidden');
+    $('#showUiBtn').style.display='none';
+    $('#hideUiBtn').style.display='inline-block';
+  });
+
+  // メーター
+  window.addEventListener('resize', resizeMeterCanvas);
+  resizeMeterCanvas();
+  $('#startMeterBtn').addEventListener('click', startMeter);
+  $('#stopMeterBtn').addEventListener('click', stopMeter);
+
+  // ★ 歌詞サイズ（スライダー/ボタン + 保存）
+  const saved = localStorage.getItem('lyricSizePx');
+  if(saved){
+    setLyricSize(parseInt(saved,10));
+    fontRange.value = parseInt(saved,10);
+  }else{
+    setLyricSize(parseInt(fontRange.value,10));
+  }
+  fontRange.addEventListener('input', e=>{
+    setLyricSize(parseInt(e.target.value,10));
+  });
+  $('#fontPlus').addEventListener('click', ()=>{
+    const v = Math.min(72, parseInt(fontRange.value,10) + 2);
+    fontRange.value = v; setLyricSize(v);
+  });
+  $('#fontMinus').addEventListener('click', ()=>{
+    const v = Math.max(24, parseInt(fontRange.value,10) - 2);
+    fontRange.value = v; setLyricSize(v);
+  });
+
+  function setLyricSize(px){
+    document.documentElement.style.setProperty('--lyric-size', px + 'px');
+    // 文字が大きい時は行間を少し上げると読みやすい
+    const lh = px >= 56 ? 1.5 : 1.6;
+    document.documentElement.style.setProperty('--lyric-line-height', lh);
+    fontVal.textContent = px + 'px';
+    localStorage.setItem('lyricSizePx', String(px));
+  }
+
+  // URLパラメータで自動読み込み (?song=...&lrc=...)
+  (async function autoLoad(){
+    const q = new URLSearchParams(location.search);
+    const song = q.get('song'); const lrc = q.get('lrc');
+    if(song){ player.src = song; status.textContent = `音源: ${song}`; }
+    if(lrc){
+      try{
+        const res = await fetch(lrc, { cache:'no-store' });
+        if(!res.ok) throw new Error(res.status);
+        const text = await res.text();
+        entries = parseLRC(text);
+        renderLyrics(entries);
+        status.textContent += `\n歌詞: ${lrc}  行数:${entries.length}  offset:${offsetMs}ms`;
+        player.addEventListener('loadedmetadata', ()=> updateActiveLine(0), { once:true });
+      }catch(e){
+        status.textContent += `\n歌詞の読み込みに失敗: ${e}`;
+      }
+    }
+  })();
+});
+</script>
+</body>
+</html>
